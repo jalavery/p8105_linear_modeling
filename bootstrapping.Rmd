@@ -1,0 +1,96 @@
+---
+title: "Bootstrapping"
+author: "Jessica Lavery"
+date: "11/14/2019"
+output: github_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(p8105.datasets)
+
+set.seed(1)
+```
+
+```{r}
+n_samp = 250
+
+# simulated dataframe with constant variance
+sim_df_const = 
+  tibble(
+    x = rnorm(n_samp, 1, 1),
+    error = rnorm(n_samp, 0, 1),
+    y = 2 + 3 * x + error
+  )
+
+# change so that variance is dependent on x (linear regression assumption of constant  variance doesn't hold)
+# confidence interval for slope is completely wrong
+sim_df_nonconst = sim_df_const %>% 
+  mutate(
+  error = error * .75 * x,
+  y = 2 + 3 * x + error
+)
+```
+
+```{r}
+sim_df = 
+  bind_rows(const = sim_df_const, nonconst = sim_df_nonconst, .id = "data_source") 
+
+sim_df %>% 
+  ggplot(aes(x = x, y = y)) + 
+  geom_point(alpha = .5) +
+  stat_smooth(method = "lm") +
+  facet_grid(~data_source) 
+```
+
+# Fit linear models
+```{r}
+# dataset with constant variane (lm assumptions hold)
+lm(y ~ x, data = sim_df_const) %>% 
+  broom::tidy() %>% 
+  knitr::kable(digits = 3)
+
+# datset with nonconstant variance
+# should be more variance in this model than the model on the dataset with constant variance, results from model aren't really representative of what we would expect
+lm(y ~ x, data = sim_df_nonconst) %>% 
+  broom::tidy() %>% 
+  knitr::kable(digits = 3)
+```
+
+# Bootstrap
+```{r}
+# write code to sample before writing as a function
+sim_df_nonconst %>% 
+  sample_frac(replace = TRUE, size = 1) %>% 
+  arrange(x)
+
+# write a function to draw a bootstrap sample based on a dataframe
+boot_sample = function(df) {
+  sample_frac(df, replace = TRUE)
+}
+
+# make sure that this function works
+boot_sample(sim_df_nonconst) %>% 
+  ggplot(aes(x = x, y = y)) + 
+  geom_point(alpha = .5) +
+  stat_smooth(method = "lm")
+
+# run bootstrap sampling
+boot_straps = tibble(
+    strap_number = 1:1000,
+    strap_sample = rerun(1000, boot_sample(sim_df_nonconst))
+  )
+
+# look at a few bootstrap samples
+boot_straps %>% 
+  filter(strap_number %in% 1:2) %>% 
+  # sort by x within each sample
+  mutate(strap_sample = map(strap_sample, ~arrange(.x, x))) %>% 
+  # pulls out data frames
+  pull(strap_sample)
+```
+
