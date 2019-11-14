@@ -16,24 +16,24 @@ library(p8105.datasets)
 set.seed(1)
 ```
 
+
+## Create sample datasets
+
+Create one that violates and one that does not violate the assumptions of linear regression models. 
+
 ```{r}
 n_samp = 250
 
 # simulated dataframe with constant variance
-sim_df_const = 
-  tibble(
-    x = rnorm(n_samp, 1, 1),
+sim_df_const = tibble(x = rnorm(n_samp, 1, 1),
     error = rnorm(n_samp, 0, 1),
-    y = 2 + 3 * x + error
-  )
+    y = 2 + 3 * x + error)
 
 # change so that variance is dependent on x (linear regression assumption of constant  variance doesn't hold)
 # confidence interval for slope is completely wrong
 sim_df_nonconst = sim_df_const %>% 
-  mutate(
-  error = error * .75 * x,
-  y = 2 + 3 * x + error
-)
+  mutate(error = error * .75 * x,
+  y = 2 + 3 * x + error)
 ```
 
 ```{r}
@@ -93,4 +93,113 @@ boot_straps %>%
   # pulls out data frames
   pull(strap_sample)
 ```
+
+## Run analyses
+
+```{r}
+# go through all bootstrapped samples and compute the standard error of the estimate
+# fit model to each bootstrapped sample
+# tidy the results of each bootstrapped sample
+# summarize over the intercept and beta1 coefficient
+bootstrap_results = boot_straps %>% 
+  mutate(models = map(strap_sample, ~lm(y ~ x, data = .x)),
+         results = map(models, broom::tidy)) %>% 
+  select(-strap_sample, -models) %>% 
+  unnest(cols = c(results)) 
+
+# summarize the results
+bootstrap_results %>% 
+  group_by(term) %>% 
+  summarize(boot_se = sd(estimate))
+
+bootstrap_results %>% 
+  knitr::kable(digits = 3)
+
+# compare to original linear model
+# Comparing these to the results of ordinary least squares, the standard error for the intercept is much smaller and the standard error for the intercept is a bit larger. This is reasonable, given the non-constant variance in the data given smaller residuals around zero and larger residuals in the the tails of the x distribution.
+lm(y ~ x, data = sim_df_nonconst) %>% 
+  broom::tidy()
+```
+
+## Try the modelr package
+
+The only difference is how you generate your bootstrap samples at the beginning of the process. 
+
+```{r}
+boot_straps = sim_df_nonconst %>% 
+  modelr::bootstrap(n = 1000)
+
+# put in the form of a tibble to look at 1 bootstrapped sample
+as_tibble(boot_straps$strap[[1]])
+
+# after this all of the subsequent steps are the same
+sim_df_nonconst %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(
+    models = map(strap, ~lm(y ~ x, data = .x) ),
+    results = map(models, broom::tidy)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>% 
+  group_by(term) %>% 
+  summarize(boot_se = sd(estimate))
+
+```
+
+## What if your assumptions aren't wrong?
+
+We can look at bootstrapping on the dataset that didn't violate the assumption of linear models. 
+
+```{r}
+# after this all of the subsequent steps are the same
+sim_df_const %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(
+    models = map(strap, ~lm(y ~ x, data = .x) ),
+    results = map(models, broom::tidy)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>% 
+  group_by(term) %>% 
+  summarize(boot_se = sd(estimate))
+
+# compare to original results
+# almost exactly the same!
+lm(y ~ x, data = sim_df_const) %>% 
+  broom::tidy()
+```
+
+If your assumptions of a linear model are correct, the bootstrap and the model on the original data are going to be consistent. Bootstrap more useful in scenario where assumptions aren't met since it will account for this in the estimates of the parameters. 
+# Example: Airbnb data
+
+```{r}
+data("nyc_airbnb")
+
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(stars = review_scores_location / 2) %>% 
+  rename(
+    boro = neighbourhood_group,
+    neighborhood = neighbourhood) %>% 
+  filter(boro != "Staten Island") %>% 
+  select(price, stars, boro, neighborhood, room_type)
+
+nyc_airbnb %>% 
+  ggplot(aes(x = stars, y = price, color = room_type)) + 
+  geom_point() 
+```
+
+```{r}
+airbnb_results <- nyc_airbnb %>% 
+  filter(boro == "Manhattan") %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(models = map(strap, ~ lm(price ~ stars + room_type, data = .x)),
+    results = map(models, broom::tidy)) %>% 
+  select(results) %>% 
+  unnest(results) 
+
+airbnb_results %>% 
+  filter(term == "stars") %>% 
+  ggplot(aes(x = estimate)) + geom_density()
+```
+
+
 
